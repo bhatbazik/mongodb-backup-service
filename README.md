@@ -184,5 +184,28 @@ node src/backup.js
 
 ---
 
+## How It Works (Simple Overview)
+
+### 1. Execution Flow
+- **Cron Scheduler**: A background timer wakes up at scheduled hours (02:00, 08:00, 11:00, 14:00, 17:00, 20:00, 23:00 IST).
+- **Concurrency Lock (`.backup.lock`)**: Before starting, the service acquires a lock file. If a previous backup is still running, it skips execution to avoid overloading server memory/CPU.
+- **Database Dump (`mongodump`)**: Spawns `mongodump` to dump and compress the MongoDB database into a temporary `.archive.gz` file on disk.
+
+### 2. SHA-256 Verification (Why We Use It)
+- **What is SHA-256?**: SHA-256 generates a unique digital fingerprint of the file. If even a single byte of a 10GB backup is altered or corrupted, the fingerprint changes completely.
+- **Why we need it**: Uploading large files across the internet can occasionally result in network corruption or incomplete transfers.
+- **Double Verification**:
+  1. We calculate the SHA-256 fingerprint locally before uploading and send it as custom metadata to Cloudflare R2.
+  2. Right after the upload finishes, we query Cloudflare R2 (`HeadObject`) to verify that the remote object's byte size and SHA-256 metadata match our local calculation 100%.
+  3. This guarantees the uploaded backup in the cloud is complete and uncorrupted before deleting the local temporary copy.
+
+### 3. Multipart Upload & Cleanup
+- **Multipart Stream Upload**: The archive is uploaded in small 10MB parts (2 streams at a time). If a network stutter occurs, only that specific 10MB chunk is retried rather than restarting the entire upload.
+- **Local File Deletion**: After successful remote verification, the local file is unlinked to save disk space. If an error occurs, the local file is preserved for manual recovery.
+- **Auto Retention**: Cloudflare R2 automatically purges backups older than 15 days based on your bucket lifecycle policy.
+- **Email Alerts**: Sends a detailed SMTP email report containing duration, size, SHA-256 hash, or failure error traces.
+
+---
+
 ## License
 ISC
