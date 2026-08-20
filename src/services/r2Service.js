@@ -24,6 +24,7 @@ export async function uploadToR2(filePath, objectKey, sha256) {
         backupTime: new Date().toISOString(),
       },
     },
+    checksumAlgorithm: "SHA256",
     partSize: 10 * 1024 * 1024,
     queueSize: 2,
     leavePartsOnError: false,
@@ -71,9 +72,10 @@ export async function verifyR2Object(objectKey, expectedSize, expectedSha256) {
 
   if (remoteSha256 !== expectedSha256) {
     throw new Error(
-      `R2 SHA-256 mismatch. Expected ${expectedSha256}, received ${remoteSha256 ?? "missing"}.`
+      `R2 SHA-256 metadata mismatch. Expected ${expectedSha256}, stored ${remoteSha256 ?? "missing"}.`
     );
   }
 
   console.log("R2 verification successful.");
 }
+
