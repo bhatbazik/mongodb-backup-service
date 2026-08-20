@@ -1,0 +1,22 @@
+{
+  "name": "mediflux-backup-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "backup": "node src/backup.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1114.0",
+    "@aws-sdk/lib-storage": "^3.1114.0",
+    "dotenv": "^17.4.2",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^9.0.5"
+  }
+}
