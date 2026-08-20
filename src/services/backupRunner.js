@@ -84,10 +84,14 @@ export async function runBackup() {
     console.log("");
     console.log(message);
 
-    await sendEmail(
-      `MongoDB Backup Successful - ${timestamp.readable}`,
-      message
-    );
+    try {
+      await sendEmail(
+        `MongoDB Backup Successful - ${timestamp.readable}`,
+        message
+      );
+    } catch (emailError) {
+      console.error("Failed to send success email:", emailError.message);
+    }
 
   } catch (error) {
     console.error("");
@@ -95,6 +99,18 @@ export async function runBackup() {
     console.error("MONGODB BACKUP FAILED");
     console.error(error);
     console.error("========================================");
+
+    // Clean up local file on failure to prevent disk fill
+    if (localFile) {
+      try {
+        await fsp.unlink(localFile);
+        console.log("Local temporary backup cleaned up after failure.");
+      } catch (cleanupError) {
+        if (cleanupError.code !== "ENOENT") {
+          console.error("Failed to clean up local file:", cleanupError);
+        }
+      }
+    }
 
     const message =
       `MongoDB backup FAILED.\n\n` +
@@ -104,12 +120,16 @@ export async function runBackup() {
       `Error:\n` +
       `${error.stack || error.message}\n\n` +
       `Local file:\n` +
-      `${localFile ?? "None"}`;
+      `Cleaned up`;
 
-    await sendEmail(
-      `MongoDB Backup FAILED - ${timestamp.readable}`,
-      message
-    );
+    try {
+      await sendEmail(
+        `MongoDB Backup FAILED - ${timestamp.readable}`,
+        message
+      );
+    } catch (emailError) {
+      console.error("Failed to send failure alert email:", emailError.message);
+    }
   } finally {
     if (lockAcquired) {
       await releaseLock();

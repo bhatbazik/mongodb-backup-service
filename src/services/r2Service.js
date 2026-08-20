@@ -24,7 +24,6 @@ export async function uploadToR2(filePath, objectKey, sha256) {
         backupTime: new Date().toISOString(),
       },
     },
-    checksumAlgorithm: "SHA256",
     partSize: 10 * 1024 * 1024,
     queueSize: 2,
     leavePartsOnError: false,

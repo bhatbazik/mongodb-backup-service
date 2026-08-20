@@ -13,6 +13,7 @@ export async function sendEmail(subject, text) {
     console.log("Email notification sent.");
   } catch (error) {
     console.error("Failed to send email:", error);
+    throw error;
   }
 }
 
@@ -22,5 +23,6 @@ export async function verifySmtp() {
     console.log("SMTP connection verified.");
   } catch (error) {
     console.error("SMTP verification failed:", error);
+    throw new Error(`SMTP verification failed: ${error.message}`);
   }
 }

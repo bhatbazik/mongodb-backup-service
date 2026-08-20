@@ -1,12 +1,10 @@
 # MediFlux Backup Service
 
-Automated backup daemon for MongoDB. Dumps the database via `mongodump`, compresses into gzip archives, streams to Cloudflare R2 using AWS S3 multipart upload, verifies object integrity via SHA-256, and sends email status alerts.
+Automated backup daemon for MongoDB. Dumps the database via `mongodump`, compresses into gzip archives, streams to Cloudflare R2 using AWS S3 multipart upload, verifies upload size and metadata, and sends email status alerts.
 
 ---
 
 ## Architecture Flow
-
-![MediFlux Backup Service Architecture](assets/architecture_diagram.png)
 
 ```mermaid
 flowchart TD
@@ -15,11 +13,11 @@ flowchart TD
     Lock -- Acquired --> Dump[Run mongodump]
     Dump --> SHA256[Compute SHA-256]
     SHA256 --> Upload[Stream Upload to R2]
-    Upload --> Verify[Verify HeadObject Size & Hash]
+    Upload --> Verify[Verify HeadObject Size & Metadata]
     Verify -- Match --> Cleanup[Delete Local Temp Archive]
     Cleanup --> EmailSuccess[Send Success Email]
     
-    Dump -- Error --> Fail[Retain Temp File for Debugging]
+    Dump -- Error --> Fail[Clean Up Temp File]
     Upload -- Error --> Fail
     Verify -- Mismatch --> Fail
     Fail --> EmailFail[Send Failure Alert Email]
@@ -178,7 +176,7 @@ node src/backup.js
 - **`src/services/backupRunner.js`**: Main workflow coordinator. Handles execution sequence and exception handling.
 - **`src/services/lockService.js`**: File locking via `.backup.lock` to prevent overlapping runs.
 - **`src/services/mongoDumpService.js`**: Manages `mongodump` child process spawning and timeouts.
-- **`src/services/r2Service.js`**: Streams files to Cloudflare R2 via `@aws-sdk/lib-storage` (10MB part size) and verifies `HeadObject` metadata.
+- **`src/services/r2Service.js`**: Streams files to Cloudflare R2 via `@aws-sdk/lib-storage` (10MB part size) and verifies upload via `HeadObject` size check and metadata round-trip.
 - **`src/services/emailService.js`**: Handles SMTP transport verification and alert dispatching.
 - **`src/scheduler/cron.js`**: Sets up `node-cron` schedule configured for `Asia/Kolkata` time zone.
 
@@ -191,19 +189,19 @@ node src/backup.js
 - **Concurrency Lock (`.backup.lock`)**: Before starting, the service acquires a lock file. If a previous backup is still running, it skips execution to avoid overloading server memory/CPU.
 - **Database Dump (`mongodump`)**: Spawns `mongodump` to dump and compress the MongoDB database into a temporary `.archive.gz` file on disk.
 
-### 2. SHA-256 Verification (Why We Use It)
-- **What is SHA-256?**: SHA-256 generates a unique digital fingerprint of the file. If even a single byte of a 10GB backup is altered or corrupted, the fingerprint changes completely.
-- **Why we need it**: Uploading large files across the internet can occasionally result in network corruption or incomplete transfers.
-- **Double Verification**:
-  1. We calculate the SHA-256 fingerprint locally before uploading and send it as custom metadata to Cloudflare R2.
-  2. Right after the upload finishes, we query Cloudflare R2 (`HeadObject`) to verify that the remote object's byte size and SHA-256 metadata match our local calculation 100%.
-  3. This guarantees the uploaded backup in the cloud is complete and uncorrupted before deleting the local temporary copy.
+### 2. Upload Verification
+- **Size Check**: After upload, the service queries R2 (`HeadObject`) and verifies the remote object's byte size matches the local file size exactly. This catches truncated or incomplete uploads.
+- **SHA-256 Metadata Tag**: The local file's SHA-256 hash is calculated before upload and attached as custom metadata. After upload, the service reads this metadata back to confirm R2 stored it correctly. This is a **metadata round-trip check**, not a content integrity check — R2 does not re-compute the hash server-side.
+
+> **Limitation**: Cloudflare R2 does not support AWS S3's `ChecksumAlgorithm` feature, so true server-side content verification is not available. For full end-to-end integrity, you would need to download the object after upload and re-hash it. The SHA-256 metadata is still useful during restore as a verification reference.
+
+HENCE BEFORE RESTORE WE CAN STILL DOWNLOAD THE DUMP AND VERIFY THE INTEGRITY OF THE ARCHIVE BY HASHING THE FILE AND COMPARING IT WITH METADATA SAVED HASH
 
 ### 3. Multipart Upload & Cleanup
 - **Multipart Stream Upload**: The archive is uploaded in small 10MB parts (2 streams at a time). If a network stutter occurs, only that specific 10MB chunk is retried rather than restarting the entire upload.
-- **Local File Deletion**: After successful remote verification, the local file is unlinked to save disk space. If an error occurs, the local file is preserved for manual recovery.
+- **Local File Deletion**: After successful remote verification, the local file is unlinked to save disk space. If an error occurs during any step, the local file is also cleaned up automatically to prevent disk fill from accumulated failed backups.
 - **Auto Retention**: Cloudflare R2 automatically purges backups older than 15 days based on your bucket lifecycle policy.
-- **Email Alerts**: Sends a detailed SMTP email report containing duration, size, SHA-256 hash, or failure error traces.
+- **Email Alerts**: Sends a detailed SMTP email report containing duration, size, SHA-256 hash, or failure error traces. SMTP connectivity is verified on service startup — if SMTP is unreachable, the service will not start.
 
 ---
 
